@@ -507,7 +507,7 @@ def check_once(config: configparser.ConfigParser, jobs: Dict[str, dict]) -> bool
             body = format_job_body(job_id, job, info, old_state, new_state)
             html_body = format_job_html(job_id, job, info, old_state, new_state)
             send_email(config, subject, body, html_body)
-            print(f"{now_text()} notified job {job_id}: {old_state} -> {new_state}")
+            print(f"{now_text()} notified job {job_id}: {old_state} -> {new_state}", flush=True)
             job["initial_notified"] = True
             changed = True
 
@@ -527,7 +527,7 @@ def command_run(args: argparse.Namespace) -> None:
     config = load_config()
     interval = args.interval or config.getint("watch", "interval_seconds", fallback=60)
 
-    print(f"Watcher started. interval={interval}s jobs={JOBS_PATH}")
+    print(f"Watcher started. interval={interval}s jobs={JOBS_PATH}", flush=True)
     while True:
         jobs = load_jobs()
         try:
@@ -535,7 +535,7 @@ def command_run(args: argparse.Namespace) -> None:
             if changed:
                 save_jobs(jobs)
         except Exception as exc:
-            print(f"{now_text()} ERROR: {exc}", file=sys.stderr)
+            print(f"{now_text()} ERROR: {exc}", file=sys.stderr, flush=True)
         if args.once:
             break
         time.sleep(interval)

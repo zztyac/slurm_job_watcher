@@ -4,4 +4,4 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
-exec python3 slurm_job_watcher.py run "$@"
+exec python3 -u slurm_job_watcher.py run "$@"
