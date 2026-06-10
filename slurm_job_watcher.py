@@ -509,6 +509,7 @@ def check_once(config: configparser.ConfigParser, jobs: Dict[str, dict]) -> bool
             send_email(config, subject, body, html_body)
             print(f"{now_text()} notified job {job_id}: {old_state} -> {new_state}")
             job["initial_notified"] = True
+            changed = True
 
         if old_state != new_state:
             job["last_state"] = new_state
