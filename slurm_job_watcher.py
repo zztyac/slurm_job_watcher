@@ -4,6 +4,7 @@
 import argparse
 import configparser
 import email.message
+import html
 import json
 import os
 import shlex
@@ -200,7 +201,7 @@ def smtp_settings(config: configparser.ConfigParser) -> Tuple[str, int, str, str
     return host, port, username, password, sender, recipients, use_ssl
 
 
-def send_email(config: configparser.ConfigParser, subject: str, body: str) -> None:
+def send_email(config: configparser.ConfigParser, subject: str, body: str, html_body: str = "") -> None:
     host, port, username, password, sender, recipients, use_ssl = smtp_settings(config)
 
     msg = email.message.EmailMessage()
@@ -208,6 +209,8 @@ def send_email(config: configparser.ConfigParser, subject: str, body: str) -> No
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = subject
     msg.set_content(body)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
 
     if use_ssl:
         with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
@@ -218,6 +221,38 @@ def send_email(config: configparser.ConfigParser, subject: str, body: str) -> No
             smtp.starttls()
             smtp.login(username, password)
             smtp.send_message(msg)
+
+
+def display_value(value: object, default: str = "-") -> str:
+    text = str(value or "").strip()
+    return text if text else default
+
+
+def html_escape(value: object, default: str = "-") -> str:
+    return html.escape(display_value(value, default))
+
+
+def state_color(state: str) -> str:
+    state = normalize_state(state)
+    if state == "COMPLETED":
+        return "#0f766e"
+    if state == "RUNNING":
+        return "#2563eb"
+    if state == "PENDING":
+        return "#b45309"
+    if state in {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "BOOT_FAIL"}:
+        return "#dc2626"
+    return "#475569"
+
+
+def state_badge_html(state: str) -> str:
+    safe_state = html_escape(normalize_state(state))
+    color = state_color(state)
+    return (
+        f'<span style="display:inline-block;padding:4px 10px;border-radius:999px;'
+        f'background:{color};color:#ffffff;font-size:13px;font-weight:700;'
+        f'letter-spacing:0.2px;">{safe_state}</span>'
+    )
 
 
 def format_job_body(job_id: str, job_record: dict, info: Dict[str, str], old_state: str, new_state: str) -> str:
@@ -242,6 +277,87 @@ def format_job_body(job_id: str, job_record: dict, info: Dict[str, str], old_sta
         f"Command: {job_record.get('command', '')}",
     ]
     return "\n".join(lines)
+
+
+def detail_row(label: str, value: object) -> str:
+    return (
+        '<tr>'
+        f'<td style="padding:8px 12px;color:#64748b;font-size:13px;width:150px;'
+        f'border-bottom:1px solid #e2e8f0;">{html_escape(label)}</td>'
+        f'<td style="padding:8px 12px;color:#0f172a;font-size:14px;'
+        f'border-bottom:1px solid #e2e8f0;font-weight:600;">{html_escape(value)}</td>'
+        '</tr>'
+    )
+
+
+def format_job_html(job_id: str, job_record: dict, info: Dict[str, str], old_state: str, new_state: str) -> str:
+    event_time = now_text()
+    node_or_reason = info.get("NodeList", info.get("ReasonOrNode", ""))
+    command = display_value(job_record.get("command", ""), "")
+    transition = f"{display_value(old_state)} -> {display_value(new_state)}"
+
+    rows = [
+        detail_row("Job ID", job_id),
+        detail_row("Watcher name", job_record.get("name", "")),
+        detail_row("Slurm job name", info.get("JobName", "")),
+        detail_row("Source", info.get("Source", "")),
+        detail_row("Exit code", info.get("ExitCode", "")),
+        detail_row("Start", info.get("Start", "")),
+        detail_row("End", info.get("End", "")),
+        detail_row("Elapsed", info.get("Elapsed", "")),
+        detail_row("Node / Reason", node_or_reason),
+        detail_row("Time limit", info.get("TimeLimit", "")),
+        detail_row("Added at", job_record.get("added_at", "")),
+    ]
+
+    command_block = ""
+    if command:
+        command_block = (
+            '<div style="margin-top:18px;">'
+            '<div style="color:#64748b;font-size:13px;font-weight:700;margin-bottom:6px;">Command</div>'
+            '<pre style="margin:0;padding:12px 14px;background:#0f172a;color:#e2e8f0;'
+            'border-radius:6px;white-space:pre-wrap;word-break:break-word;'
+            'font-size:13px;line-height:1.45;font-family:SFMono-Regular,Consolas,Menlo,monospace;">'
+            f'{html.escape(command)}'
+            '</pre>'
+            '</div>'
+        )
+
+    return f"""<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#0f172a;">
+    <div style="max-width:720px;margin:0 auto;padding:24px 16px;">
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+        <div style="padding:20px 22px;border-bottom:1px solid #e2e8f0;background:#f1f5f9;">
+          <div style="font-size:13px;color:#64748b;font-weight:700;text-transform:uppercase;">Slurm Job Watcher</div>
+          <div style="margin-top:8px;font-size:22px;line-height:1.25;font-weight:800;color:#0f172a;">Job {html_escape(job_id)} status update</div>
+          <div style="margin-top:12px;">
+            {state_badge_html(old_state)}
+            <span style="display:inline-block;margin:0 8px;color:#64748b;font-weight:700;">&#8594;</span>
+            {state_badge_html(new_state)}
+          </div>
+        </div>
+
+        <div style="padding:18px 22px;">
+          <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;">
+            <tr>
+              <td style="padding:8px 12px;color:#64748b;font-size:13px;width:150px;border-bottom:1px solid #e2e8f0;">State</td>
+              <td style="padding:8px 12px;color:#0f172a;font-size:14px;border-bottom:1px solid #e2e8f0;font-weight:700;">{html_escape(transition)}</td>
+            </tr>
+            {''.join(rows)}
+          </table>
+
+          {command_block}
+
+          <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.5;">
+            Event time: {html_escape(event_time)}<br>
+            Watcher host: {html_escape(socket.gethostname())}
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>"""
 
 
 def should_notify(old_state: str, new_state: str) -> bool:
@@ -292,12 +408,25 @@ notify_initial_state = true
 def command_test_mail(args: argparse.Namespace) -> None:
     config = load_config()
     subject = "[slurm-watcher] test email"
-    body = "\n".join([
-        "This is a test email from slurm_job_watcher.",
-        f"Time: {now_text()}",
-        f"Host: {socket.gethostname()}",
-    ])
-    send_email(config, subject, body)
+    job_record = {
+        "name": "email_format_preview",
+        "added_at": now_text(),
+        "command": "python3 slurm_job_watcher.py test-mail",
+    }
+    info = {
+        "JobName": "email_format_preview",
+        "State": "RUNNING",
+        "ExitCode": "",
+        "Start": now_text(),
+        "End": "",
+        "Elapsed": "0:01",
+        "NodeList": socket.gethostname(),
+        "TimeLimit": "test",
+        "Source": "test-mail",
+    }
+    body = format_job_body("TEST", job_record, info, "PENDING", "RUNNING")
+    html_body = format_job_html("TEST", job_record, info, "PENDING", "RUNNING")
+    send_email(config, subject, body, html_body)
     print("Test email sent.")
 
 
@@ -376,7 +505,8 @@ def check_once(config: configparser.ConfigParser, jobs: Dict[str, dict]) -> bool
         if notify:
             subject = f"[slurm-watcher] job {job_id} {old_state} -> {new_state}"
             body = format_job_body(job_id, job, info, old_state, new_state)
-            send_email(config, subject, body)
+            html_body = format_job_html(job_id, job, info, old_state, new_state)
+            send_email(config, subject, body, html_body)
             print(f"{now_text()} notified job {job_id}: {old_state} -> {new_state}")
             job["initial_notified"] = True
 
