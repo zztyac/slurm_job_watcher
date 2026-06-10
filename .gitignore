@@ -1,0 +1,7 @@
+config.ini
+jobs.json
+watcher.log
+*.log
+__pycache__/
+*.py[cod]
+.DS_Store
