@@ -1,6 +1,7 @@
 config.ini
 jobs.json
 watcher.log
+slurm_job_watcher.lock
 *.log
 __pycache__/
 *.py[cod]

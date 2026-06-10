@@ -4,6 +4,7 @@
 import argparse
 import configparser
 import email.message
+import fcntl
 import html
 import json
 import os
@@ -21,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.ini"
 JOBS_PATH = BASE_DIR / "jobs.json"
+LOCK_PATH = BASE_DIR / "slurm_job_watcher.lock"
 
 ACTIVE_STATES = {
     "PENDING",
@@ -527,18 +529,27 @@ def command_run(args: argparse.Namespace) -> None:
     config = load_config()
     interval = args.interval or config.getint("watch", "interval_seconds", fallback=60)
 
-    print(f"Watcher started. interval={interval}s jobs={JOBS_PATH}", flush=True)
-    while True:
-        jobs = load_jobs()
+    with LOCK_PATH.open("w", encoding="utf-8") as lock_file:
         try:
-            changed = check_once(config, jobs)
-            if changed:
-                save_jobs(jobs)
-        except Exception as exc:
-            print(f"{now_text()} ERROR: {exc}", file=sys.stderr, flush=True)
-        if args.once:
-            break
-        time.sleep(interval)
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise WatcherError(f"Another watcher is already running. Lock file: {LOCK_PATH}")
+
+        lock_file.write(f"pid={os.getpid()}\nstarted_at={now_text()}\n")
+        lock_file.flush()
+
+        print(f"Watcher started. interval={interval}s jobs={JOBS_PATH}", flush=True)
+        while True:
+            jobs = load_jobs()
+            try:
+                changed = check_once(config, jobs)
+                if changed:
+                    save_jobs(jobs)
+            except Exception as exc:
+                print(f"{now_text()} ERROR: {exc}", file=sys.stderr, flush=True)
+            if args.once:
+                break
+            time.sleep(interval)
 
 
 def build_parser() -> argparse.ArgumentParser:
